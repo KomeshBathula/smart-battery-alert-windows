@@ -109,6 +109,14 @@ class SettingsGUI:
             variable=self.vars['show_percentage']
         ).pack(anchor='w')
         
+        # Run at Startup
+        self.vars['run_at_startup'] = tk.BooleanVar(value=self._check_startup_status())
+        ttk.Checkbutton(
+            display_frame, 
+            text="Run Smart Battery Alert at Windows startup",
+            variable=self.vars['run_at_startup']
+        ).pack(anchor='w', pady=(5, 0))
+        
         # Update interval
         interval_frame = ttk.Frame(display_frame)
         interval_frame.pack(fill='x', pady=10)
@@ -474,6 +482,9 @@ class SettingsGUI:
     def _save_settings(self):
         """Save settings to config"""
         try:
+            # Handle startup setting
+            self._update_startup_status(self.vars['run_at_startup'].get())
+            
             # General settings
             self.monitor.config['show_panel_percentage'] = self.vars['show_percentage'].get()
             self.monitor.config['update_interval'] = int(self.vars['update_interval'].get())
@@ -546,6 +557,55 @@ class SettingsGUI:
         if self.window:
             self.window.destroy()
             self.window = None
+
+    def _check_startup_status(self):
+        """Check if application is set to run at startup (Windows Registry)"""
+        import sys
+        if sys.platform != 'win32':
+            return False
+            
+        try:
+            import winreg
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_READ) as key:
+                try:
+                    winreg.QueryValueEx(key, "SmartBatteryAlert")
+                    return True
+                except FileNotFoundError:
+                    return False
+        except Exception as e:
+            print(f"Error checking startup status: {e}")
+            return False
+
+    def _update_startup_status(self, enable):
+        """Enable/disable run at startup in Windows Registry"""
+        import sys
+        if sys.platform != 'win32':
+            return
+            
+        try:
+            import winreg
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
+                if enable:
+                    # Get the absolute path to main.py
+                    import os
+                    app_path = os.path.abspath(sys.argv[0])
+                    # If running as script, use python.exe
+                    if app_path.endswith('.py'):
+                        python_exe = sys.executable
+                        command = f'"{python_exe}" "{app_path}"'
+                    else:
+                        command = f'"{app_path}"'
+                    
+                    winreg.SetValueEx(key, "SmartBatteryAlert", 0, winreg.REG_SZ, command)
+                else:
+                    try:
+                        winreg.DeleteValue(key, "SmartBatteryAlert")
+                    except FileNotFoundError:
+                        pass
+        except Exception as e:
+            print(f"Error updating startup status: {e}")
 
 
 # Test the settings GUI
