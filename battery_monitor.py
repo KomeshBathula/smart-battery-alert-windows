@@ -7,7 +7,7 @@ import psutil
 import time
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 
@@ -20,6 +20,12 @@ class BatteryMonitor:
         self.last_alerted_percent = self.config['low_battery_threshold']
         self.last_state = None
         self.last_percent = -1
+        self.charge_limit_reached = False
+        
+        # Charge prediction
+        self.charge_start_time = None
+        self.charge_start_percent = None
+        self.charge_samples = []
         
     def load_config(self):
         """Load configuration with defaults"""
@@ -108,16 +114,50 @@ class BatteryMonitor:
     def check_charge_limit(self, percent, power_plugged):
         """Check if charge limit is reached"""
         if not power_plugged or not self.config['enable_charge_limit_alarm']:
+            self.charge_limit_reached = False
             return None
         
         limit = self.config['charge_limit']
         
-        if percent >= limit:
+        if percent >= limit and not self.charge_limit_reached:
+            self.charge_limit_reached = True
             return {
                 'type': 'charge_limit',
                 'title': '🔋 Charge Limit Reached',
                 'message': f'Battery is at {percent}%. You set a limit of {limit}%.\nPlease unplug the charger to protect battery health.'
             }
+        
+        return None
+    
+    def predict_charge_time(self, percent, power_plugged):
+        """Predict when battery will be fully charged"""
+        if not power_plugged or not self.config['enable_charge_prediction']:
+            return None
+        
+        # Start tracking when plugged in
+        if self.charge_start_time is None:
+            self.charge_start_time = time.time()
+            self.charge_start_percent = percent
+            self.charge_samples = []
+        
+        # Collect samples
+        now = time.time()
+        elapsed = now - self.charge_start_time
+        
+        if elapsed > 60:  # After 1 minute of charging
+            # Calculate charge rate (% per second)
+            percent_gained = percent - self.charge_start_percent
+            if percent_gained > 0:
+                rate_per_second = percent_gained / elapsed
+                
+                # Predict time to full (100%)
+                remaining_percent = 100 - percent
+                if rate_per_second > 0:
+                    seconds_to_full = remaining_percent / rate_per_second
+                    
+                    # Format as clock time
+                    eta = datetime.now() + timedelta(seconds=seconds_to_full)
+                    return eta.strftime("%I:%M %p")
         
         return None
     
@@ -137,9 +177,13 @@ class BatteryMonitor:
             if power_plugged:
                 # Just plugged in
                 self.last_alerted_percent = self.config['low_battery_threshold']
+                self.charge_start_time = time.time()
+                self.charge_start_percent = percent
             else:
                 # Just unplugged
-                pass
+                self.charge_start_time = None
+                self.charge_start_percent = None
+                self.charge_limit_reached = False
         
         self.last_state = power_plugged
         self.last_percent = percent
@@ -154,6 +198,10 @@ class BatteryMonitor:
             return alert
         
         return None
+    
+    def get_charge_eta(self, percent, power_plugged):
+        """Get estimated time for full charge"""
+        return self.predict_charge_time(percent, power_plugged)
 
 
 if __name__ == "__main__":
@@ -167,9 +215,17 @@ if __name__ == "__main__":
         info = monitor.get_battery_info()
         if info:
             print(f"Battery: {info['percent']}% | Plugged: {info['power_plugged']}")
+            
+            # Check for alerts
             alert = monitor.monitor_once()
             if alert:
                 print(f"ALERT: {alert['title']} - {alert['message']}")
+            
+            # Show charge prediction
+            if info['power_plugged']:
+                eta = monitor.get_charge_eta(info['percent'], info['power_plugged'])
+                if eta:
+                    print(f"Charged by: {eta}")
         else:
             print("No battery detected")
         
