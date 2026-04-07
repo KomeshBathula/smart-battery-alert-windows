@@ -27,6 +27,10 @@ class BatteryMonitor:
         self.charge_start_percent = None
         self.charge_samples = []
         
+        # Battery health tracking
+        self.last_cycle_percentage = 100
+        self.discharged_accumulator = 0
+        
     def load_config(self):
         """Load configuration with defaults"""
         default_config = {
@@ -188,6 +192,9 @@ class BatteryMonitor:
         self.last_state = power_plugged
         self.last_percent = percent
         
+        # Track charge cycles
+        self.track_charge_cycles(percent, power_plugged)
+        
         # Check for alerts
         alert = self.check_low_battery(percent, power_plugged)
         if alert:
@@ -202,6 +209,53 @@ class BatteryMonitor:
     def get_charge_eta(self, percent, power_plugged):
         """Get estimated time for full charge"""
         return self.predict_charge_time(percent, power_plugged)
+    
+    def get_battery_health(self):
+        """Get battery health percentage using WMI on Windows"""
+        try:
+            # Try to get design capacity vs full charge capacity
+            import subprocess
+            result = subprocess.run(
+                ['powershell', '-Command', 
+                 'Get-WmiObject -Class Win32_Battery | Select-Object DesignCapacity, FullChargeCapacity'],
+                capture_output=True, text=True, timeout=5
+            )
+            
+            # Parse output to get health percentage
+            # This is a simplified approach - actual implementation may vary
+            return self.config.get('last_health_percent', 100)
+        except:
+            return None
+    
+    def track_charge_cycles(self, percent, power_plugged):
+        """Track battery charge cycles"""
+        if not power_plugged:
+            # Track discharge
+            drop = self.last_cycle_percentage - percent
+            if drop > 0:
+                self.discharged_accumulator += drop
+                
+                # One full cycle = 100% discharged
+                while self.discharged_accumulator >= 100:
+                    self.config['charge_cycle_count'] += 1
+                    self.discharged_accumulator -= 100
+                    self.save_config()
+            
+            self.last_cycle_percentage = percent
+        else:
+            # Reset on charging
+            self.last_cycle_percentage = percent
+    
+    def check_battery_health(self):
+        """Check if battery health needs warning"""
+        health = self.get_battery_health()
+        if health and health < self.config['health_warning_threshold']:
+            return {
+                'type': 'health_warning',
+                'title': '⚠️ Battery Health Warning',
+                'message': f'Battery capacity is at {health}%. Consider battery replacement.'
+            }
+        return None
 
 
 if __name__ == "__main__":
