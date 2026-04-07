@@ -20,6 +20,9 @@ class SoundManager:
             'low_battery': 'SystemExclamation',
             'critical_battery': 'SystemHand',
             'charge_limit': 'SystemAsterisk',
+            'over_charge': 'SystemExclamation',
+            'charger_connected': 'SystemAsterisk',
+            'fully_charged': 'SystemAsterisk',
             'health_warning': 'SystemExclamation',
             'default': 'SystemAsterisk'
         }
@@ -68,6 +71,9 @@ class SoundManager:
                 'low_battery': winsound.MB_ICONEXCLAMATION,
                 'critical_battery': winsound.MB_ICONHAND,
                 'charge_limit': winsound.MB_ICONASTERISK,
+                'over_charge': winsound.MB_ICONEXCLAMATION,
+                'charger_connected': winsound.MB_ICONASTERISK,
+                'fully_charged': winsound.MB_ICONASTERISK,
                 'health_warning': winsound.MB_ICONEXCLAMATION,
                 'default': winsound.MB_OK
             }

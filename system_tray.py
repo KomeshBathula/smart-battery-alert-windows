@@ -1,6 +1,7 @@
 """
 Smart Battery Alert for Windows
 System Tray Integration - Provides system tray icon with menu
+Feature parity with Linux GNOME extension
 """
 
 import threading
@@ -155,6 +156,20 @@ class SystemTray:
         
         return img
     
+    def _set_charge_limit(self, limit):
+        """Set charge limit via quick-set button"""
+        def action(icon, item):
+            self.monitor.set_charge_limit(limit)
+            self.update_icon()
+            print(f"Charge limit set to {limit}%")
+        return action
+    
+    def _is_limit_selected(self, limit):
+        """Check if this limit is currently selected"""
+        def check(item):
+            return self.monitor.config.get('charge_limit') == limit
+        return check
+    
     def get_menu(self):
         """Create the system tray menu"""
         info = self.monitor.get_battery_info()
@@ -162,7 +177,11 @@ class SystemTray:
         if info:
             percent = info['percent']
             charging = info['power_plugged']
-            status = "Charging" if charging else "Discharging"
+            
+            if charging:
+                status = "⚡ Charging"
+            else:
+                status = "🔋 On battery"
             
             # Get charge ETA if charging
             eta_text = ""
@@ -171,22 +190,64 @@ class SystemTray:
                 if eta:
                     eta_text = f" (Full by {eta})"
             
-            battery_text = f"Battery: {percent}% - {status}{eta_text}"
+            battery_text = f"Battery: {percent}%"
+            status_text = f"Status: {status}{eta_text}"
         else:
             battery_text = "Battery: Not detected"
+            status_text = "Status: Unknown"
         
-        # Get cycle count and health
+        # Get cycle count
         cycles = self.monitor.config.get('charge_cycle_count', 0)
         
+        # Get current charge limit
+        current_limit = self.monitor.config.get('charge_limit', 80)
+        
+        # Get shutdown tip
+        shutdown_tip = None
+        if info and info['power_plugged']:
+            shutdown_tip = self.monitor.get_shutdown_tip(info['percent'], info['power_plugged'])
+        
+        # Build menu items
         menu_items = [
+            # Header
+            item('Smart Battery Alert', None, enabled=False),
+            pystray.Menu.SEPARATOR,
+            
+            # Battery info
             item(battery_text, None, enabled=False),
+            item(status_text, None, enabled=False),
             item(f"Charge Cycles: {cycles}", None, enabled=False),
+            item(f"Charge Limit: {current_limit}%", None, enabled=False),
+        ]
+        
+        # Add shutdown tip if charging
+        if shutdown_tip:
+            menu_items.append(pystray.Menu.SEPARATOR)
+            menu_items.append(item(shutdown_tip, None, enabled=False))
+        
+        menu_items.append(pystray.Menu.SEPARATOR)
+        
+        # Quick-set charge limit submenu
+        menu_items.append(
+            item('Set Charge Limit', pystray.Menu(
+                item('70% (Conservative)', self._set_charge_limit(70), 
+                     checked=self._is_limit_selected(70)),
+                item('80% (Recommended)', self._set_charge_limit(80),
+                     checked=self._is_limit_selected(80)),
+                item('90% (Balanced)', self._set_charge_limit(90),
+                     checked=self._is_limit_selected(90)),
+                item('100% (Full)', self._set_charge_limit(100),
+                     checked=self._is_limit_selected(100)),
+            ))
+        )
+        
+        menu_items.extend([
             pystray.Menu.SEPARATOR,
             item('Settings', self._on_settings),
             item('Refresh', self._on_refresh),
             pystray.Menu.SEPARATOR,
             item('Quit', self._on_quit)
-        ]
+        ])
         
         return pystray.Menu(*menu_items)
     
@@ -228,8 +289,18 @@ class SystemTray:
                 self.icon.menu = self.get_menu()
                 
                 # Update tooltip
-                status = "Charging" if charging else "Discharging"
-                self.icon.title = f"Smart Battery Alert - {percent}% ({status})"
+                status = "Charging" if charging else "On battery"
+                eta = ""
+                if charging:
+                    eta_time = self.monitor.get_charge_eta(percent, charging)
+                    if eta_time:
+                        eta = f" - Full by {eta_time}"
+                
+                # Show percentage in tooltip if enabled
+                if self.monitor.config.get('show_panel_percentage', True):
+                    self.icon.title = f"Smart Battery Alert - {percent}% ({status}){eta}"
+                else:
+                    self.icon.title = f"Smart Battery Alert - {status}{eta}"
     
     def start(self):
         """Start the system tray icon"""
